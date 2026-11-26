@@ -1,0 +1,71 @@
+name: Pull request
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ConnectionStrings__Finance: Host=127.0.0.1;Database=finance_test;Username=finance;Password=finance_test
+      FINANCE_AUTH_TEST_CONNECTION: Host=127.0.0.1;Database=finance_test;Username=finance;Password=finance_test
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: finance_test
+          POSTGRES_USER: finance
+          POSTGRES_PASSWORD: finance_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finance -d finance_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build tests/Finance.Api.Tests.csproj --configuration Release
+      - name: Apply database migrations
+        run: |
+          dotnet tool install dotnet-ef --tool-path "$RUNNER_TEMP/dotnet-tools" --version 10.0.15
+          "$RUNNER_TEMP/dotnet-tools/dotnet-ef" database update --project api/Finance.Api.csproj --configuration Release --no-build
+      - name: Run API tests
+        run: dotnet test tests/Finance.Api.Tests.csproj --configuration Release --no-build
+
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run frontend tests
+        run: npm test
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build
+        run: npm run build
